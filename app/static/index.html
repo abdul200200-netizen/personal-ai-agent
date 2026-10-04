@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Personal AI Agent — Powered by OpenCode</title>
+  <style>
+    :root {
+      --bg: #0b0f19;
+      --panel: #131a2a;
+      --panel-alt: #1a2337;
+      --border: #26324d;
+      --text: #e8edf7;
+      --muted: #93a3c0;
+      --accent: #38bdf8;
+      --accent-hover: #0ea5e9;
+      --success: #22c55e;
+      --warning: #f59e0b;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    header {
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .brand-badge {
+      background: linear-gradient(135deg, #38bdf8, #6366f1);
+      color: #fff;
+      font-weight: 700;
+      padding: 6px 11px;
+      border-radius: 8px;
+      font-size: 0.82rem;
+      letter-spacing: 0.04em;
+    }
+    .brand h1 {
+      font-size: 1.15rem;
+      font-weight: 600;
+    }
+    .status-pills {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .pill {
+      font-size: 0.78rem;
+      padding: 5px 11px;
+      border-radius: 999px;
+      background: var(--panel-alt);
+      border: 1px solid var(--border);
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--success);
+    }
+    .dot.warn { background: var(--warning); }
+    main {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 1.35fr 1fr;
+      gap: 18px;
+      padding: 18px 24px;
+      max-width: 1440px;
+      width: 100%;
+      margin: 0 auto;
+    }
+    @media (max-width: 960px) {
+      main { grid-template-columns: 1fr; }
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .card-header {
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .card-header h2 {
+      font-size: 0.96rem;
+      font-weight: 600;
+    }
+    .chat-box {
+      flex: 1;
+      min-height: 400px;
+      max-height: 540px;
+      overflow-y: auto;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .msg {
+      max-width: 85%;
+      padding: 11px 14px;
+      border-radius: 10px;
+      font-size: 0.9rem;
+      line-height: 1.48;
+      white-space: pre-wrap;
+    }
+    .msg.user {
+      align-self: flex-end;
+      background: #1d4ed8;
+      color: #fff;
+    }
+    .msg.assistant {
+      align-self: flex-start;
+      background: var(--panel-alt);
+      border: 1px solid var(--border);
+    }
+    .msg-meta {
+      font-size: 0.72rem;
+      color: var(--muted);
+      margin-bottom: 4px;
+    }
+    .chat-form {
+      border-top: 1px solid var(--border);
+      padding: 12px 16px;
+      display: flex;
+      gap: 10px;
+    }
+    input, select, button {
+      font-family: inherit;
+      font-size: 0.88rem;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--panel-alt);
+      color: var(--text);
+      padding: 9px 12px;
+    }
+    input:focus, select:focus {
+      outline: 1px solid var(--accent);
+    }
+    .chat-form input { flex: 1; }
+    button {
+      background: var(--accent);
+      color: #061325;
+      font-weight: 600;
+      border: none;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    button:hover { background: var(--accent-hover); }
+    button.secondary {
+      background: var(--panel-alt);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .side-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .section-body {
+      padding: 14px 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    .row input { flex: 1; }
+    .list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      max-height: 165px;
+      overflow-y: auto;
+    }
+    .list-item {
+      background: var(--panel-alt);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 11px;
+      font-size: 0.83rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+    }
+    .muted { color: var(--muted); font-size: 0.78rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <span class="brand-badge">OPENCODE ONLY</span>
+      <h1>Personal AI Agent</h1>
+    </div>
+    <div class="status-pills">
+      <div class="pill"><span class="dot"></span> <span id="opencode-pill">OpenCode: loading...</span></div>
+      <div class="pill"><span class="dot" id="tg-dot"></span> <span id="tg-pill">Telegram</span></div>
+      <div class="pill"><span class="dot" id="gws-dot"></span> <span id="gws-pill">Google Workspace</span></div>
+    </div>
+  </header>
+
+  <main>
+    <!-- Chat Column -->
+    <section class="card">
+      <div class="card-header">
+        <h2>OpenCode Agent Chat</h2>
+        <div class="row">
+          <input id="model-input" type="text" placeholder="Model (e.g. big-pickle)" style="width: 170px;" />
+          <button class="secondary" onclick="clearChat()">Clear</button>
+        </div>
+      </div>
+      <div class="chat-box" id="chat-box"></div>
+      <form class="chat-form" onsubmit="sendChat(event)">
+        <input id="chat-input" type="text" placeholder="Ask OpenCode to manage tasks, calendar events, sheets, or memories..." required />
+        <button type="submit" id="send-btn">Send</button>
+      </form>
+    </section>
+
+    <!-- Tools & Integrations Column -->
+    <div class="side-stack">
+      <!-- Tasks -->
+      <section class="card">
+        <div class="card-header">
+          <h2>Personal Tasks (SQLite)</h2>
+        </div>
+        <div class="section-body">
+          <form class="row" onsubmit="createTask(event)">
+            <input id="task-title" type="text" placeholder="New task title..." required />
+            <button type="submit">Add</button>
+          </form>
+          <div class="list" id="tasks-list"></div>
+        </div>
+      </section>
+
+      <!-- Calendar Events -->
+      <section class="card">
+        <div class="card-header">
+          <h2>Google Calendar Events</h2>
+        </div>
+        <div class="section-body">
+          <form class="row" onsubmit="createEvent(event)">
+            <input id="ev-summary" type="text" placeholder="Event summary..." required />
+            <input id="ev-start" type="text" placeholder="2026-10-05T10:00:00Z" required style="max-width: 175px;" />
+            <button type="submit">Add</button>
+          </form>
+          <div class="list" id="events-list"></div>
+        </div>
+      </section>
+
+      <!-- Google Sheets -->
+      <section class="card">
+        <div class="card-header">
+          <h2>Google Sheets Rows</h2>
+        </div>
+        <div class="section-body">
+          <form class="row" onsubmit="appendSheet(event)">
+            <input id="sheet-values" type="text" placeholder="Comma-separated row (e.g. Coffee, $4.50, Food)" required />
+            <button type="submit">Append</button>
+          </form>
+          <div class="list" id="sheet-list"></div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    const SESSION_ID = "web_default";
+
+    async function loadStatus() {
+      const res = await fetch("/api/status");
+      const data = await res.json();
+      document.getElementById("opencode-pill").textContent =
+        `OpenCode (${data.opencode.mode}): ${data.opencode.model}`;
+      document.getElementById("model-input").value = data.opencode.model;
+
+      const tgDot = document.getElementById("tg-dot");
+      tgDot.className = data.telegram.configured ? "dot" : "dot warn";
+      document.getElementById("tg-pill").textContent =
+        data.telegram.configured ? "Telegram: Ready" : "Telegram: Token unset";
+
+      const gwsDot = document.getElementById("gws-dot");
+      gwsDot.className = data.google_workspace.live_configured ? "dot" : "dot warn";
+      document.getElementById("gws-pill").textContent =
+        data.google_workspace.live_configured ? "Google API: Live" : "Google: SQLite Fallback";
+    }
+
+    async function loadMessages() {
+      const res = await fetch(`/api/conversations/${SESSION_ID}/messages`);
+      const data = await res.json();
+      const box = document.getElementById("chat-box");
+      box.innerHTML = "";
+      if (!data.messages.length) {
+        box.innerHTML = `<div class="muted">No messages yet. Start chatting with your OpenCode agent below!</div>`;
+        return;
+      }
+      for (const m of data.messages) {
+        appendMessageBubble(m.role, m.content, m.model, m.tool_calls);
+      }
+      box.scrollTop = box.scrollHeight;
+    }
+
+    function appendMessageBubble(role, content, model, toolCalls) {
+      const box = document.getElementById("chat-box");
+      const div = document.createElement("div");
+      div.className = `msg ${role}`;
+      const meta = document.createElement("div");
+      meta.className = "msg-meta";
+      meta.textContent = role === "user" ? "You" : `${model || "opencode"}`;
+      div.appendChild(meta);
+      const body = document.createElement("div");
+      body.textContent = content;
+      div.appendChild(body);
+      if (toolCalls && toolCalls.length) {
+        const tc = document.createElement("div");
+        tc.className = "muted";
+        tc.style.marginTop = "6px";
+        tc.textContent = `Tools executed: ${toolCalls.map(t => t.name).join(", ")}`;
+        div.appendChild(tc);
+      }
+      box.appendChild(div);
+      box.scrollTop = box.scrollHeight;
+    }
+
+    async function sendChat(e) {
+      e.preventDefault();
+      const input = document.getElementById("chat-input");
+      const modelInput = document.getElementById("model-input");
+      const btn = document.getElementById("send-btn");
+      const message = input.value.trim();
+      if (!message) return;
+
+      input.value = "";
+      btn.disabled = true;
+      appendMessageBubble("user", message, "user", []);
+
+      try {
+        const res = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            session_id: SESSION_ID,
+            message,
+            model: modelInput.value.trim() || undefined
+          })
+        });
+        const data = await res.json();
+        appendMessageBubble("assistant", data.reply, data.model, data.tool_calls);
+        await refreshSidePanels();
+      } catch (err) {
+        appendMessageBubble("assistant", "Error contacting server: " + err, "opencode", []);
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    async function clearChat() {
+      await fetch(`/api/conversations/${SESSION_ID}`, { method: "DELETE" });
+      await loadMessages();
+    }
+
+    async function loadTasks() {
+      const res = await fetch("/api/tasks");
+      const data = await res.json();
+      const list = document.getElementById("tasks-list");
+      list.innerHTML = data.tasks.length ? "" : `<div class="muted">No tasks yet.</div>`;
+      for (const t of data.tasks) {
+        const item = document.createElement("div");
+        item.className = "list-item";
+        item.innerHTML = `
+          <span>${t.status === "completed" ? "✅" : "⬜"} ${t.title}</span>
+          ${t.status !== "completed" ? `<button class="secondary" style="padding:3px 8px;font-size:0.75rem" onclick="completeTask(${t.id})">Done</button>` : ""}
+        `;
+        list.appendChild(item);
+      }
+    }
+
+    async function createTask(e) {
+      e.preventDefault();
+      const input = document.getElementById("task-title");
+      await fetch("/api/tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: input.value.trim() })
+      });
+      input.value = "";
+      await loadTasks();
+    }
+
+    async function completeTask(id) {
+      await fetch(`/api/tasks/${id}/complete`, { method: "POST" });
+      await loadTasks();
+    }
+
+    async function loadEvents() {
+      const res = await fetch("/api/calendar/events");
+      const data = await res.json();
+      const list = document.getElementById("events-list");
+      const events = data.events || [];
+      list.innerHTML = events.length ? "" : `<div class="muted">No upcoming events (${data.source}).</div>`;
+      for (const ev of events) {
+        const item = document.createElement("div");
+        item.className = "list-item";
+        item.innerHTML = `<span>📅 <strong>${ev.summary}</strong></span><span class="muted">${ev.start_time}</span>`;
+        list.appendChild(item);
+      }
+    }
+
+    async function createEvent(e) {
+      e.preventDefault();
+      const summary = document.getElementById("ev-summary").value.trim();
+      const start = document.getElementById("ev-start").value.trim();
+      await fetch("/api/calendar/events", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          summary,
+          start_time: start,
+          end_time: start
+        })
+      });
+      document.getElementById("ev-summary").value = "";
+      await loadEvents();
+    }
+
+    async function loadSheets() {
+      const res = await fetch("/api/sheets/rows");
+      const data = await res.json();
+      const list = document.getElementById("sheet-list");
+      const rows = data.rows || [];
+      list.innerHTML = rows.length ? "" : `<div class="muted">No rows recorded (${data.source}).</div>`;
+      for (const r of rows) {
+        const item = document.createElement("div");
+        item.className = "list-item";
+        item.textContent = Array.isArray(r) ? r.join(" | ") : JSON.stringify(r);
+        list.appendChild(item);
+      }
+    }
+
+    async function appendSheet(e) {
+      e.preventDefault();
+      const raw = document.getElementById("sheet-values").value;
+      const values = raw.split(",").map(s => s.trim()).filter(Boolean);
+      await fetch("/api/sheets/rows", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ values })
+      });
+      document.getElementById("sheet-values").value = "";
+      await loadSheets();
+    }
+
+    async function refreshSidePanels() {
+      await Promise.all([loadTasks(), loadEvents(), loadSheets()]);
+    }
+
+    window.addEventListener("DOMContentLoaded", async () => {
+      document.getElementById("ev-start").value = new Date(Date.now() + 3600000).toISOString().slice(0, 16) + ":00Z";
+      await Promise.all([loadStatus(), loadMessages(), refreshSidePanels()]);
+    });
+  </script>
+</body>
+</html>
