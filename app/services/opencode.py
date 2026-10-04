@@ -62,7 +62,7 @@ AGENT_TOOLS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "read_sheet_rows",
-            "description": "Read rows from the configured Google Sheet.",
+            "description": "Read rows from the configured Google Sheet, or from the local SQLite row store when no sheet is configured.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -78,7 +78,7 @@ AGENT_TOOLS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "append_sheet_row",
-            "description": "Append a row of values to the configured Google Sheet.",
+            "description": "Append a row to the configured Google Sheet, or to the local SQLite row store when no sheet is configured.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -247,8 +247,10 @@ class OpenCodeService:
         return (
             "You are a helpful Personal AI Agent powered exclusively by OpenCode.\n"
             f"Current UTC time: {now_utc}\n"
-            "You have access to tools for managing Google Calendar events, Google Sheets rows, "
-            "personal tasks, and persistent SQLite memories.\n"
+            "You have tools for Google Calendar, spreadsheet-like rows, tasks, and saved memories. "
+            "Google Sheets is optional: when no sheet is configured, read_sheet_rows and "
+            "append_sheet_row use the local SQLite row store. Be clear that these local rows "
+            "are not synced to Google Sheets.\n"
             "Saved user memories:\n"
             f"{mem_lines}\n"
             "Be concise, accurate, and proactive in using tools when the user asks about their "

@@ -16,7 +16,7 @@ Deployable Personal AI Agent with **Telegram integration**, **FastAPI**, **SQLit
 - **Google Calendar & Google Sheets (`app/services/google_workspace.py`)**
   - List and create Google Calendar events (`list_calendar_events`, `create_calendar_event`).
   - Read and append Google Sheets rows (`read_sheet_rows`, `append_sheet_row`).
-  - Automatic local SQLite fallback when Google Service Account credentials are not configured yet.
+  - Google Sheets is optional: row tools use local SQLite when Google credentials or a spreadsheet ID are absent (or Sheets API calls fail). Local rows are not synchronized to Google Sheets.
 - **SQLite Persistence (`app/database.py`)**
   - Stores multi-session conversation history, personal tasks, and persistent user memories.
 - **FastAPI + Web Dashboard (`app/main.py`, `app/static/index.html`)**
@@ -32,7 +32,7 @@ Deployable Personal AI Agent with **Telegram integration**, **FastAPI**, **SQLit
 cp .env.example .env
 ```
 
-Edit `.env` to set your OpenCode, Telegram, and Google credentials:
+Edit `.env` to set your OpenCode and Telegram configuration. Google Workspace credentials and a spreadsheet ID are optional; sheet-row tools fall back to local SQLite when they are absent.
 
 ```env
 OPENCODE_MODE=api
@@ -73,5 +73,5 @@ docker compose up --build -d
 | `POST` | `/api/tasks/{task_id}/complete` | Complete a task |
 | `GET` / `POST` | `/api/memories` | List or save persistent agent memories |
 | `GET` / `POST` | `/api/calendar/events` | List or create Google Calendar events |
-| `GET` / `POST` | `/api/sheets/rows` | Read or append Google Sheets rows |
+| `GET` / `POST` | `/api/sheets/rows` | Read or append rows in Google Sheets, with a local SQLite fallback when no sheet is configured |
 | `POST` | `/webhook/telegram` | Telegram Bot webhook endpoint |

@@ -275,12 +275,15 @@
         </div>
       </section>
 
-      <!-- Google Sheets -->
+      <!-- Optional Google Sheets; local SQLite is used when no sheet is configured. -->
       <section class="card">
         <div class="card-header">
-          <h2>Google Sheets Rows</h2>
+          <h2>Rows (Google Sheets optional)</h2>
         </div>
         <div class="section-body">
+          <div class="muted" id="sheet-mode-note">
+            Without a Google Sheet, rows are stored locally in SQLite and are not synced to Google.
+          </div>
           <form class="row" onsubmit="appendSheet(event)">
             <input id="sheet-values" type="text" placeholder="Comma-separated row (e.g. Coffee, $4.50, Food)" required />
             <button type="submit">Append</button>
@@ -310,6 +313,12 @@
       gwsDot.className = data.google_workspace.live_configured ? "dot" : "dot warn";
       document.getElementById("gws-pill").textContent =
         data.google_workspace.live_configured ? "Google API: Live" : "Google: SQLite Fallback";
+
+      const sheetsConfigured = data.google_workspace.live_configured &&
+        data.google_workspace.spreadsheet_id_set;
+      document.getElementById("sheet-mode-note").textContent = sheetsConfigured
+        ? "Google Sheets is configured; rows fall back to local SQLite if an API operation fails."
+        : "No Google Sheet is required. Rows are stored locally in SQLite and are not synced to Google.";
     }
 
     async function loadMessages() {

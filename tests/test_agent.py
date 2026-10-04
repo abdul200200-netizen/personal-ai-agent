@@ -8,6 +8,7 @@ _tmp_db = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
 _tmp_db.close()
 os.environ["SQLITE_DB_PATH"] = _tmp_db.name
 
+from app.config import settings  # noqa: E402
 from app.main import app  # noqa: E402
 from app.services.opencode import opencode_service  # noqa: E402
 
@@ -53,7 +54,12 @@ def test_tasks_and_memories():
     )
 
 
-def test_calendar_and_sheets_endpoints():
+def test_calendar_and_sheets_endpoints(monkeypatch):
+    # Confirm sheets use the local SQLite fallback when Google credentials/sheet are absent.
+    monkeypatch.setattr(settings, "google_service_account_json", "")
+    monkeypatch.setattr(settings, "google_service_account_file", "")
+    monkeypatch.setattr(settings, "google_spreadsheet_id", "")
+
     # Create & list calendar event
     ev = client.post(
         "/api/calendar/events",
@@ -69,11 +75,20 @@ def test_calendar_and_sheets_endpoints():
 
     # Append & read sheet row
     sh = client.post(
-        "/api/sheets/rows", json={"values": ["2026-10-04", "OpenCode API", "Active"]}
+        "/api/sheets/rows",
+        json={
+            "values": ["2026-10-04", "OpenCode API", "Active"],
+            "range_name": "LocalTest!A:C",
+        },
     )
     assert sh.status_code == 200
-    rows = client.get("/api/sheets/rows").json()["rows"]
-    assert ["2026-10-04", "OpenCode API", "Active"] in rows
+    assert sh.json()["source"] == "local_sqlite"
+    sheet_response = client.get(
+        "/api/sheets/rows", params={"range_name": "LocalTest!A:C"}
+    )
+    assert sheet_response.status_code == 200
+    assert sheet_response.json()["source"] == "local_sqlite"
+    assert ["2026-10-04", "OpenCode API", "Active"] in sheet_response.json()["rows"]
 
 
 def test_chat_and_telegram_webhook(monkeypatch):
