@@ -212,6 +212,19 @@
       gap: 8px;
     }
     .muted { color: var(--muted); font-size: 0.78rem; }
+    .diag-panel {
+      display: none;
+      margin: 12px 16px 0;
+      padding: 12px 14px;
+      background: var(--panel-alt);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 0.78rem;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      max-height: 260px;
+      overflow-y: auto;
+    }
   </style>
 </head>
 <body>
@@ -221,9 +234,10 @@
       <h1>Personal AI Agent</h1>
     </div>
     <div class="status-pills">
-      <div class="pill"><span class="dot"></span> <span id="opencode-pill">OpenCode: loading...</span></div>
+      <div class="pill"><span class="dot" id="oc-dot"></span> <span id="opencode-pill">OpenCode: loading...</span></div>
       <div class="pill"><span class="dot" id="tg-dot"></span> <span id="tg-pill">Telegram</span></div>
       <div class="pill"><span class="dot" id="gws-dot"></span> <span id="gws-pill">Google Workspace</span></div>
+      <button class="secondary" id="diag-btn" onclick="runDiagnostics()">Run diagnostics</button>
     </div>
   </header>
 
@@ -237,6 +251,7 @@
           <button class="secondary" onclick="clearChat()">Clear</button>
         </div>
       </div>
+      <pre class="diag-panel" id="diag-panel"></pre>
       <div class="chat-box" id="chat-box"></div>
       <form class="chat-form" onsubmit="sendChat(event)">
         <input id="chat-input" type="text" placeholder="Ask OpenCode to manage tasks, calendar events, sheets, or memories..." required />
@@ -294,11 +309,51 @@
   <script>
     const SESSION_ID = "web_default";
 
+    async function runDiagnostics() {
+      const panel = document.getElementById("diag-panel");
+      const btn = document.getElementById("diag-btn");
+      panel.style.display = "block";
+      panel.textContent = "Running live checks (OpenCode + Telegram)...";
+      btn.disabled = true;
+      try {
+        const res = await fetch("/api/diagnostics");
+        const data = await res.json();
+        const lines = [`Overall: ${data.ok ? "WORKING" : "NOT WORKING"}`];
+        const oc = data.opencode;
+        lines.push(`OpenCode: ${oc.ok ? "ok" : "FAIL"} (mode=${oc.mode}, model=${oc.model})`);
+        for (const c of oc.checks || []) {
+          lines.push(`  - opencode/${c.name}: ${c.ok ? "ok" : "FAIL"} ${c.detail ?? ""}`);
+        }
+        if (oc.suggested_fix) lines.push(`  FIX: ${oc.suggested_fix}`);
+        const tg = data.telegram;
+        lines.push(`Telegram: ${tg.ok ? "ok" : "FAIL"} (configured=${tg.configured}, polling=${tg.polling_running})`);
+        for (const c of tg.checks || []) {
+          lines.push(`  - telegram/${c.name}: ${c.ok ? "ok" : "FAIL"} ${c.detail ?? ""}`);
+        }
+        if (tg.suggested_fix) lines.push(`  FIX: ${tg.suggested_fix}`);
+        if (data.recent_errors && data.recent_errors.length) {
+          lines.push("Recent warnings/errors:");
+          lines.push(...data.recent_errors.slice(-8));
+        }
+        panel.textContent = lines.join("\n");
+      } catch (err) {
+        panel.textContent = "Diagnostics request failed: " + err;
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
     async function loadStatus() {
       const res = await fetch("/api/status");
       const data = await res.json();
-      document.getElementById("opencode-pill").textContent =
-        `OpenCode (${data.opencode.mode}): ${data.opencode.model}`;
+      const ocPill = document.getElementById("opencode-pill");
+      if (data.opencode.api_key_is_placeholder) {
+        ocPill.textContent = "OpenCode: API key needed";
+        document.getElementById("oc-dot").className = "dot warn";
+      } else {
+        ocPill.textContent = `OpenCode (${data.opencode.mode}): ${data.opencode.model}`;
+        document.getElementById("oc-dot").className = "dot";
+      }
       document.getElementById("model-input").value = data.opencode.model;
 
       const tgDot = document.getElementById("tg-dot");

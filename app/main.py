@@ -1,3 +1,6 @@
+import asyncio
+import collections
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -13,14 +16,90 @@ from app.services.google_workspace import google_workspace
 from app.services.opencode import opencode_service
 from app.services.telegram import telegram_service
 
+logging.basicConfig(
+    level=getattr(logging, settings.log_level, logging.INFO),
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
+logger = logging.getLogger("app")
+
+
+class _RingBufferHandler(logging.Handler):
+    """Keeps recent WARNING+ logs in memory so /api/diagnostics can expose them."""
+
+    def __init__(self, capacity: int = 200):
+        super().__init__(level=logging.WARNING)
+        self.buffer = collections.deque(maxlen=capacity)
+        # NOTE: do not replace self.lock. logging.Handler.handle() already holds
+        # it (an RLock) while calling emit(), so swapping in a plain Lock here
+        # would deadlock the process on the first warning log.
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            # The inherited RLock is reentrant, so re-acquiring it is safe.
+            with self.lock:
+                self.buffer.append(self.format(record))
+        except Exception:  # pragma: no cover - never break logging
+            pass
+
+
+_LOG_RING_HANDLER = _RingBufferHandler()
+_LOG_RING_HANDLER.setFormatter(
+    logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+)
+logging.getLogger().addHandler(_LOG_RING_HANDLER)
+
+
+async def _startup_self_check() -> None:
+    """Log immediately whether the agent can talk to OpenCode.
+
+    Runs in the background so a slow or unreachable network never blocks startup.
+    """
+    for issue in opencode_service.configuration_issues():
+        logger.warning("OpenCode configuration: %s", issue)
+
+    report = await opencode_service.diagnostics()
+    if report.get("ok"):
+        logger.info(
+            "OpenCode self-check passed (mode=%s, model=%s).",
+            report.get("mode"),
+            report.get("model"),
+        )
+        return
+
+    logger.error(
+        "OpenCode self-check FAILED. The bot will receive messages but cannot "
+        "generate replies until this is fixed."
+    )
+    for check in report.get("checks", []):
+        if not check.get("ok"):
+            logger.error("  - %s: %s", check.get("name"), check.get("detail"))
+    if report.get("suggested_fix"):
+        logger.error("  How to fix: %s", report["suggested_fix"])
+
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     db.init_db()
+    logger.info(
+        "Starting Personal AI Agent | opencode mode=%s model=%s telegram_polling=%s",
+        settings.opencode_mode,
+        settings.opencode_model,
+        settings.telegram_polling,
+    )
+    if settings.uses_anonymous_opencode_key:
+        logger.warning(
+            "OPENCODE_API_KEY is not a real key ('%s'). OpenCode Zen's anonymous "
+            "free tier was closed to third-party apps on 2026-09-23, so chat "
+            "requests will fail until you set a real key from "
+            "https://opencode.ai/auth (or use OPENCODE_MODE=cli).",
+            settings.opencode_api_key or "<empty>",
+        )
+    self_check_task = asyncio.create_task(_startup_self_check())
     await telegram_service.start_polling_if_enabled()
     try:
         yield
     finally:
+        self_check_task.cancel()
         await telegram_service.stop_polling()
 
 
@@ -104,6 +183,8 @@ async def api_status():
             "mode": settings.opencode_mode,
             "base_url": settings.opencode_base_url,
             "model": settings.opencode_model,
+            "api_key_is_placeholder": settings.uses_anonymous_opencode_key,
+            "config_issues": opencode_service.configuration_issues(),
         },
         "telegram": {
             "configured": telegram_service.is_configured,
@@ -123,6 +204,31 @@ async def api_status():
 @app.get("/api/models")
 async def list_opencode_models():
     return await opencode_service.list_models()
+
+
+def _recent_errors(limit: int = 25) -> List[str]:
+    """Return the most recent WARNING+ log lines captured by the log handler."""
+    with _LOG_RING_HANDLER.lock:
+        return list(_LOG_RING_HANDLER.buffer)[-limit:]
+
+
+@app.get("/api/diagnostics")
+async def diagnostics():
+    """Live end-to-end check of OpenCode + Telegram.
+
+    Use this first whenever the bot appears to have stopped: it reports the
+    exact upstream error and how to fix it.
+    """
+    opencode_report, telegram_report = await asyncio.gather(
+        opencode_service.diagnostics(),
+        telegram_service.diagnostics(),
+    )
+    return {
+        "ok": bool(opencode_report.get("ok") and telegram_report.get("ok")),
+        "opencode": opencode_report,
+        "telegram": telegram_report,
+        "recent_errors": _recent_errors(),
+    }
 
 
 @app.post("/api/chat")
@@ -234,4 +340,9 @@ async def telegram_webhook(
     if settings.telegram_webhook_secret:
         if x_telegram_bot_api_secret_token != settings.telegram_webhook_secret:
             raise HTTPException(status_code=403, detail="Invalid webhook secret token")
-    return await telegram_service.handle_update(update)
+    try:
+        return await telegram_service.handle_update(update)
+    except Exception as exc:
+        # Always answer 200 so Telegram does not retry the same update forever.
+        logger.exception("Telegram webhook failed to process update")
+        return {"status": "error", "error": f"{type(exc).__name__}: {exc}"}

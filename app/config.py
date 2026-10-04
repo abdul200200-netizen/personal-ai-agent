@@ -83,6 +83,19 @@ class Settings:
     )
     host: str = field(default_factory=lambda: os.getenv("HOST", "0.0.0.0").strip())
     port: int = field(default_factory=lambda: int(os.getenv("PORT", "8000")))
+    log_level: str = field(
+        default_factory=lambda: os.getenv("LOG_LEVEL", "INFO").strip().upper()
+    )
+
+    @property
+    def uses_anonymous_opencode_key(self) -> bool:
+        """True when no real OpenCode Zen key is configured.
+
+        OpenCode Zen closed anonymous free-tier access to third-party clients on
+        2026-09-23, so the placeholder key ``public`` (and an empty key) can no
+        longer complete chat requests from this app.
+        """
+        return self.opencode_api_key in ("", "public")
 
 
 settings = Settings()
