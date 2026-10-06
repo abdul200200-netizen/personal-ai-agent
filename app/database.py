@@ -2,10 +2,15 @@ import json
 import os
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from app.config import settings
+from app.core.policy import policy_engine
+
+
+class MemoryPolicyError(ValueError):
+    """Raised when a memory write contains PHI or credentials."""
 
 
 def _utc_now() -> str:
@@ -83,6 +88,11 @@ class Database:
                     sheet_range TEXT NOT NULL,
                     values_json TEXT NOT NULL,
                     created_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS telegram_processed_updates (
+                    update_id INTEGER PRIMARY KEY,
+                    processed_at TEXT NOT NULL
                 );
                 """
             )
@@ -195,8 +205,34 @@ class Database:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    # Telegram webhook deduplication
+    def claim_telegram_update(self, update_id: int) -> bool:
+        """Atomically claim an update so webhook retries cannot repeat side effects."""
+        now = datetime.now(timezone.utc)
+        cutoff = (now - timedelta(days=30)).isoformat()
+        with self.connect() as conn:
+            cursor = conn.execute(
+                "INSERT OR IGNORE INTO telegram_processed_updates (update_id, processed_at) VALUES (?, ?)",
+                (int(update_id), now.isoformat()),
+            )
+            conn.execute(
+                "DELETE FROM telegram_processed_updates WHERE processed_at < ?", (cutoff,)
+            )
+            return cursor.rowcount == 1
+
     # Memories
     def save_memory(self, key: str, value: str) -> Dict[str, Any]:
+        key = (key or "").strip()
+        value = (value or "").strip()
+        if not key or not value:
+            raise ValueError("Memory key and value are required.")
+        if len(key) > 100 or len(value) > 5000:
+            raise ValueError("Memory key must be at most 100 characters and value at most 5000.")
+
+        decision = policy_engine.check_memory_write(key, value)
+        if not decision.get("allowed"):
+            raise MemoryPolicyError(decision.get("warning") or "Memory write rejected by policy.")
+
         now = _utc_now()
         with self.connect() as conn:
             conn.execute(

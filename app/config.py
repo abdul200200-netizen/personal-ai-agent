@@ -53,6 +53,12 @@ class Settings:
             os.getenv("TELEGRAM_ALLOWED_USER_IDS", "")
         )
     )
+    # A personal assistant should be private by default. Set this to true only for
+    # an intentionally public bot; otherwise at least one allowed user ID is required.
+    telegram_allow_all_users: bool = field(
+        default_factory=lambda: os.getenv("TELEGRAM_ALLOW_ALL_USERS", "false").strip().lower()
+        in ("1", "true", "yes")
+    )
     telegram_polling: bool = field(
         default_factory=lambda: os.getenv("TELEGRAM_POLLING", "false").lower()
         in ("1", "true", "yes")

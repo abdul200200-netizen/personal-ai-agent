@@ -89,8 +89,22 @@ async def search_clinical_evidence(
     Returns:
         Consolidated evidence response with citations and metadata
     """
-    # --- PHI check ---
-    phi_check = policy_engine.check_phi(question)
+    # Check every caller-supplied search field, not only the main question, before any
+    # external request. This also protects structured API and model-tool arguments.
+    user_supplied_query = " ".join(
+        str(value)
+        for value in [
+            question,
+            population,
+            intervention,
+            comparator,
+            jurisdiction,
+            *(outcomes or []),
+            *(study_types or []),
+        ]
+        if value
+    )
+    phi_check = policy_engine.check_phi(user_supplied_query)
     if phi_check.get("phi_detected"):
         return {
             "error": "Potential patient-identifiable information detected. "
@@ -111,12 +125,11 @@ async def search_clinical_evidence(
         date_to = _default_date_to()
 
     # --- Build search query ---
-    # Combine PICO elements with the question
+    # Combine useful PICO details with the question after the PHI gate.
     query_parts = [question]
-    if intervention and intervention.lower() not in question.lower():
-        query_parts.append(intervention)
-    if population and population.lower() not in question.lower():
-        query_parts.append(population)
+    for detail in [population, intervention, comparator, *(outcomes or [])]:
+        if detail and detail.lower() not in question.lower():
+            query_parts.append(detail)
     search_query = " ".join(query_parts)
 
     # --- Execute searches in parallel ---

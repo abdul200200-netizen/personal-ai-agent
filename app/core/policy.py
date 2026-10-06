@@ -138,7 +138,10 @@ class PolicyEngine:
                 "Please remove patient identifiers (names, IDs, dates of birth, contact details) "
                 "and rephrase as a general clinical question."
             )
-            logger.warning(f"PHI detected: {matches}")
+            logger.warning(
+                "Potential PHI detected (indicator types: %s)",
+                sorted({match["pattern"] for match in matches}),
+            )
             return {
                 "phi_detected": True,
                 "matches": matches,
@@ -156,7 +159,10 @@ class PolicyEngine:
                 "Potential patient-identifiable information detected. "
                 "Please remove identifiers before searching."
             )
-            logger.warning(f"PHI detected (strong indicator): {strong_matches}")
+            logger.warning(
+                "Potential PHI detected (strong indicator types: %s)",
+                sorted({match["pattern"] for match in strong_matches}),
+            )
             return {
                 "phi_detected": True,
                 "matches": matches,
@@ -169,7 +175,10 @@ class PolicyEngine:
                 "Potential patient-identifiable information detected. "
                 "Please remove identifiers before searching."
             )
-            logger.warning(f"PHI detected (multiple indicators): {matches}")
+            logger.warning(
+                "Potential PHI detected (multiple indicator types: %s)",
+                sorted({match["pattern"] for match in matches}),
+            )
             return {
                 "phi_detected": True,
                 "matches": matches,

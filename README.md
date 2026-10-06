@@ -8,8 +8,8 @@ Deployable Personal AI Agent with **Telegram integration**, **FastAPI**, **SQLit
 
 - **OpenCode AI Engine Only (`app/services/opencode.py`)**
   - Exclusively uses **OpenCode** (no external multi-model LLM fallback routers).
-  - Supports **OpenCode Zen / HTTP API mode** (`https://opencode.ai/zen/v1` or local `opencode serve`) and **OpenCode CLI mode** (`opencode run`).
-  - Built-in function/tool calling for managing calendar events, spreadsheets, tasks, and persistent user memories.
+  - Supports **OpenCode Zen / HTTP API mode** (`https://opencode.ai/zen/v1` or local `opencode serve`) and a text-only **OpenCode CLI fallback** (`opencode run`).
+  - API mode provides tool calling for calendar, spreadsheets, tasks, safe persistent memories, and live clinical-evidence/drug searches; use `OPENCODE_MODE=api` for the full agent.
 - **Clinical Evidence Search (`app/tools/clinical_evidence_search.py`)**
   - **Live search** of PubMed, Europe PMC, ClinicalTrials.gov, and openFDA
   - **Proper citations** with PMID/PMCID/NCT identifiers, dates, and links
@@ -18,8 +18,10 @@ Deployable Personal AI Agent with **Telegram integration**, **FastAPI**, **SQLit
   - **PICO framing** support for structured clinical questions
   - All sources work **without API keys** (optional keys raise rate limits)
 - **Telegram Integration (`app/services/telegram.py`)**
-  - Supports both **Webhook** (`POST /webhook/telegram`) and background **Long Polling** (`TELEGRAM_POLLING=true`).
-  - Built-in slash commands (`/start`, `/help`, `/status`, `/tasks`, `/calendar`, `/clear`) and natural-language chat via OpenCode.
+  - Supports **Webhook** (`POST /webhook/telegram`) and background **Long Polling** (`TELEGRAM_POLLING=true`).
+  - Private by default: only IDs in `TELEGRAM_ALLOWED_USER_IDS` are accepted; group chats are ignored. An empty allowlist denies everyone.
+  - Built-in commands include `/start`, `/help`, `/status`, `/tasks`, `/calendar`, `/memory`, `/forget`, `/evidence`, `/drugs`, and `/clear`.
+  - Long replies are split safely, webhook updates are deduplicated, and message content is not written to application logs.
 - **Google Calendar & Google Sheets (`app/services/google_workspace.py`)**
   - List and create Google Calendar events (`list_calendar_events`, `create_calendar_event`).
   - Read and append Google Sheets rows (`read_sheet_rows`, `append_sheet_row`).
@@ -54,8 +56,11 @@ OPENCODE_MODEL=big-pickle
 
 # Telegram Bot (optional but recommended)
 TELEGRAM_BOT_TOKEN=your_bot_token_here
-TELEGRAM_ALLOWED_USER_IDS=your_user_id
+TELEGRAM_ALLOWED_USER_IDS=your_numeric_telegram_user_id
+TELEGRAM_ALLOW_ALL_USERS=false
 TELEGRAM_POLLING=true
+# TELEGRAM_CHAT_ID is not needed for polling; the bot replies to the incoming private chat.
+# In webhook mode, also set a strong TELEGRAM_WEBHOOK_SECRET.
 
 # Clinical Evidence APIs (optional — all work without keys at lower rate limits)
 NCBI_API_KEY=          # PubMed: 3 req/s → 10 req/s
@@ -78,6 +83,8 @@ Quick steps:
 3. Add environment variables (see guide)
 4. Deploy - Railway auto-builds from Dockerfile
 5. Bot is live! Test with `/start` in Telegram
+
+For an agent with tool use (tasks, calendar, memory, and evidence search), keep `OPENCODE_MODE=api`. The Telegram polling setup does not require a separate chat ID: the bot answers the private chat that sent the message. Restrict access with your numeric Telegram **user ID**, not a bot token or group chat ID. Allowlisted IDs share the same tasks, memories, and calendar, so keep your own ID as the only entry unless shared access is intentional.
 
 ### 2. Install & Run Locally
 
@@ -109,7 +116,8 @@ docker compose up --build -d
 | `DELETE` | `/api/conversations/{session_id}` | Clear a conversation session |
 | `GET` / `POST` | `/api/tasks` | List or create personal tasks |
 | `POST` | `/api/tasks/{task_id}/complete` | Complete a task |
-| `GET` / `POST` | `/api/memories` | List or save persistent agent memories |
+| `GET` / `POST` | `/api/memories` | List or save persistent agent memories (PHI/credentials rejected) |
+| `DELETE` | `/api/memories/{key}` | Delete a saved memory |
 | `GET` / `POST` | `/api/calendar/events` | List or create Google Calendar events |
 | `GET` / `POST` | `/api/sheets/rows` | Read or append Google Sheets rows |
 | `POST` | `/webhook/telegram` | Telegram Bot webhook endpoint |
@@ -169,10 +177,12 @@ See `clinical/evidence-policy.md` for full policy details.
 
 ## Hermes-Style Identity
 
-The agent uses a **Hermes-inspired identity system** (see `workspace/`):
+The agent uses a **Hermes-inspired identity and skills layer** (not the separate Hermes runtime):
 
-- **SOUL.md**: Defines agent identity, behavior rules, safety guardrails, and PHI boundaries
-- **USER.md**: User-editable profile (preferences, professional context, clinical defaults)
-- **MEMORY.md**: Durable non-sensitive preferences (reviewable and deletable)
+- **SOUL.md**: Loaded into the assistant's system prompt for identity, behavior rules, and PHI boundaries
+- **USER.md**: User-editable profile and preferences, loaded as context
+- **MEMORY.md**: Durable, non-sensitive workspace memory, loaded as context
+- **`skills/*/SKILL.md`**: Personal-assistant and clinical-evidence workflows loaded into the prompt
+- **SQLite memories**: Reviewable with `/memory` and deletable with `/forget <key>`
 
-This provides a **transparent, auditable personality layer** that separates personal context from clinical evidence retrieval.
+The documents are re-read for new requests, so edits take effect without changing Python code. Keep secrets and patient-identifiable information out of these files: workspace context and saved memories are included in prompts sent to the configured OpenCode provider. Live clinical tools independently block queries flagged as patient-identifiable.

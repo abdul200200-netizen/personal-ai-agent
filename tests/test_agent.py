@@ -8,6 +8,7 @@ _tmp_db = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
 _tmp_db.close()
 os.environ["SQLITE_DB_PATH"] = _tmp_db.name
 
+from app.config import settings  # noqa: E402
 from app.main import app  # noqa: E402
 from app.services.opencode import opencode_service  # noqa: E402
 
@@ -77,6 +78,9 @@ def test_calendar_and_sheets_endpoints():
 
 
 def test_chat_and_telegram_webhook(monkeypatch):
+    monkeypatch.setattr(settings, "telegram_allowed_user_ids", [42])
+    monkeypatch.setattr(settings, "telegram_allow_all_users", False)
+
     async def mock_chat_via_api(session_id: str, active_model: str):
         return {
             "reply": "Hello from OpenCode!",
