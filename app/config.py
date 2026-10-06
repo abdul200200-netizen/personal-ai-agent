@@ -84,5 +84,22 @@ class Settings:
     host: str = field(default_factory=lambda: os.getenv("HOST", "0.0.0.0").strip())
     port: int = field(default_factory=lambda: int(os.getenv("PORT", "8000")))
 
+    # Clinical Evidence APIs (optional — all work without keys at lower rate limits)
+    ncbi_api_key: str = field(
+        default_factory=lambda: os.getenv("NCBI_API_KEY", "").strip()
+    )
+    openfda_api_key: str = field(
+        default_factory=lambda: os.getenv("OPENFDA_API_KEY", "").strip()
+    )
+    umls_api_key: str = field(
+        default_factory=lambda: os.getenv("UMLS_API_KEY", "").strip()
+    )
+    clinical_evidence_cache_ttl: int = field(
+        default_factory=lambda: int(os.getenv("CLINICAL_EVIDENCE_CACHE_TTL", "86400"))
+    )
+    retrieval_default_window_years: int = field(
+        default_factory=lambda: int(os.getenv("RETRIEVAL_DEFAULT_WINDOW_YEARS", "5"))
+    )
+
 
 settings = Settings()
