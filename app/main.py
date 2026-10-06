@@ -12,6 +12,7 @@ from app.database import db
 from app.services.google_workspace import google_workspace
 from app.services.opencode import opencode_service
 from app.services.telegram import telegram_service
+from app.tools.clinical_evidence_search import search_clinical_evidence, search_drugs
 
 
 @asynccontextmanager
@@ -74,6 +75,26 @@ class SheetAppendRequest(BaseModel):
     values: List[Any]
     spreadsheet_id: Optional[str] = None
     range_name: Optional[str] = None
+
+
+class ClinicalEvidenceSearchRequest(BaseModel):
+    question: str
+    population: Optional[str] = None
+    intervention: Optional[str] = None
+    comparator: Optional[str] = None
+    outcomes: Optional[List[str]] = None
+    jurisdiction: Optional[str] = None
+    sources: Optional[List[str]] = None  # pubmed, europe_pmc, clinicaltrials, openfda
+    date_from: Optional[str] = None
+    date_to: Optional[str] = None
+    study_types: Optional[List[str]] = None
+    max_results_per_source: int = 5
+
+
+class DrugSearchRequest(BaseModel):
+    drug_name: str
+    include_events: bool = False
+    max_results: int = 5
 
 
 # ---------------------------------------------------------------------------
@@ -223,6 +244,82 @@ async def append_sheet_row(payload: SheetAppendRequest):
         spreadsheet_id=payload.spreadsheet_id,
         range_name=payload.range_name,
     )
+
+
+# Clinical Evidence Search
+@app.post("/api/evidence/search")
+async def search_evidence(payload: ClinicalEvidenceSearchRequest):
+    """Search clinical evidence sources (PubMed, Europe PMC, ClinicalTrials.gov, openFDA)."""
+    result = await search_clinical_evidence(
+        question=payload.question,
+        population=payload.population,
+        intervention=payload.intervention,
+        comparator=payload.comparator,
+        outcomes=payload.outcomes,
+        jurisdiction=payload.jurisdiction,
+        sources=payload.sources,
+        date_from=payload.date_from,
+        date_to=payload.date_to,
+        study_types=payload.study_types,
+        max_results_per_source=payload.max_results_per_source,
+    )
+    return result
+
+
+@app.post("/api/evidence/drugs")
+async def search_drug_info(payload: DrugSearchRequest):
+    """Search openFDA for drug labeling and (optionally) adverse events."""
+    result = await search_drugs(
+        drug_name=payload.drug_name,
+        include_events=payload.include_events,
+        max_results=payload.max_results,
+    )
+    return result
+
+
+@app.get("/api/evidence/sources")
+async def list_evidence_sources():
+    """List available clinical evidence sources and their configuration status."""
+    return {
+        "sources": {
+            "pubmed": {
+                "name": "PubMed E-utilities",
+                "type": "peer_reviewed",
+                "configured": True,
+                "api_key": bool(settings.ncbi_api_key),
+                "rate_limit": "10 req/s with key, 3 req/s without",
+                "description": "Peer-reviewed biomedical literature",
+            },
+            "europe_pmc": {
+                "name": "Europe PMC",
+                "type": "peer_reviewed",
+                "configured": True,
+                "api_key": False,
+                "rate_limit": "5 req/s (conservative)",
+                "description": "Complementary literature + open-access full text",
+            },
+            "clinicaltrials": {
+                "name": "ClinicalTrials.gov API v2",
+                "type": "registry_data",
+                "configured": True,
+                "api_key": False,
+                "rate_limit": "5 req/s (conservative)",
+                "description": "Trial status and results (registry data, NOT peer-reviewed)",
+            },
+            "openfda": {
+                "name": "openFDA",
+                "type": "regulatory_data",
+                "configured": True,
+                "api_key": bool(settings.openfda_api_key),
+                "rate_limit": "240/min with key, 120/min without",
+                "description": "Drug labeling, adverse events, recalls (regulatory data)",
+            },
+        },
+        "defaults": {
+            "lookback_years": settings.retrieval_default_window_years,
+            "cache_ttl_seconds": settings.clinical_evidence_cache_ttl,
+        },
+    }
 
 
 # Telegram Webhook
