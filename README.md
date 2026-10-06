@@ -52,6 +52,11 @@ OPENCODE_BASE_URL=https://opencode.ai/zen/v1
 OPENCODE_API_KEY=public
 OPENCODE_MODEL=big-pickle
 
+# Telegram Bot (optional but recommended)
+TELEGRAM_BOT_TOKEN=your_bot_token_here
+TELEGRAM_ALLOWED_USER_IDS=your_user_id
+TELEGRAM_POLLING=true
+
 # Clinical Evidence APIs (optional — all work without keys at lower rate limits)
 NCBI_API_KEY=          # PubMed: 3 req/s → 10 req/s
 OPENFDA_API_KEY=       # openFDA: 120/min → 240/min
@@ -62,6 +67,17 @@ UMLS_API_KEY=          # UMLS terminology (optional)
 - **NCBI_API_KEY**: Get at https://www.ncbi.nlm.nih.gov/account/settings/
 - **OPENFDA_API_KEY**: Get at https://open.fda.gov/apis/authorization/
 - **UMLS_API_KEY**: Get at https://uts.nlm.nih.gov/uts/
+
+### 🚀 Deploy to Railway (Recommended)
+
+See the full deployment guide: [docs/DEPLOYMENT_TELEGRAM_RAILWAY.md](docs/DEPLOYMENT_TELEGRAM_RAILWAY.md)
+
+Quick steps:
+1. Create a Telegram Bot via @BotFather
+2. Create Railway account and connect GitHub repo
+3. Add environment variables (see guide)
+4. Deploy - Railway auto-builds from Dockerfile
+5. Bot is live! Test with `/start` in Telegram
 
 ### 2. Install & Run Locally
 

@@ -1,0 +1,20 @@
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+numReplicas = 1
+healthcheckPath = "/health"
+healthcheckTimeout = 300
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
+
+[[services]]
+name = "personal-ai-agent"
+
+  [services.networking]
+  httpPort = 8000
+
+  [[services.volumes]]
+  path = "/app/data"
+  name = "agent-data"
