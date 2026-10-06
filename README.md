@@ -20,14 +20,19 @@ Deployable Personal AI Agent with **Telegram integration**, **FastAPI**, **SQLit
 - **Telegram Integration (`app/services/telegram.py`)**
   - Supports **Webhook** (`POST /webhook/telegram`) and background **Long Polling** (`TELEGRAM_POLLING=true`).
   - Private by default: only IDs in `TELEGRAM_ALLOWED_USER_IDS` are accepted; group chats are ignored. An empty allowlist denies everyone.
-  - Built-in commands include `/start`, `/help`, `/status`, `/tasks`, `/calendar`, `/memory`, `/forget`, `/evidence`, `/drugs`, and `/clear`.
+  - Built-in commands include `/start`, `/help`, `/status`, `/tasks`, `/calendar`, `/memory`, `/forget`, `/proposals`, `/approve`, `/reject`, `/think`, `/brief`, `/evidence`, `/drugs`, and `/clear`.
+  - Daily, weekly, and monthly Telegram reflections are **opt-in**; timezone and daily times are configurable per user.
   - Long replies are split safely, webhook updates are deduplicated, and message content is not written to application logs.
 - **Google Calendar & Google Sheets (`app/services/google_workspace.py`)**
   - List and create Google Calendar events (`list_calendar_events`, `create_calendar_event`).
   - Read and append Google Sheets rows (`read_sheet_rows`, `append_sheet_row`).
   - Automatic local SQLite fallback when Google Service Account credentials are not configured yet.
-- **SQLite Persistence (`app/database.py`)**
-  - Stores multi-session conversation history, personal tasks, and persistent user memories.
+- **SQLite Persistence and Human-Reviewed Learning (`app/database.py`)**
+  - Stores multi-session conversation history, personal tasks, preferences, and persistent user memories.
+  - The agent can propose memory or skill improvements; users review them with `/proposals`, `/approve`, and `/reject`. Skill files are never edited by the bot.
+- **Thinking Mode and Cadence (`app/services/scheduler.py`)**
+  - `/think on|off` enables constructive Socratic challenge for strategic/design questions without exposing private chain-of-thought.
+  - `/brief on` opts in to daily intent/ledger prompts, weekly calibration, and month-end review; `/brief off` pauses them.
 - **FastAPI + Web Dashboard (`app/main.py`, `app/static/index.html`)**
   - Interactive browser UI at `/` and REST API endpoints for chat, status, tasks, memories, calendar, sheets, and clinical evidence.
 - **Hermes-Style Identity (`workspace/`)**
@@ -61,6 +66,9 @@ TELEGRAM_ALLOW_ALL_USERS=false
 TELEGRAM_POLLING=true
 # TELEGRAM_CHAT_ID is not needed for polling; the bot replies to the incoming private chat.
 # In webhook mode, also set a strong TELEGRAM_WEBHOOK_SECRET.
+
+# Timezone for optional proactive briefs (IANA timezone)
+USER_TIMEZONE=Asia/Riyadh
 
 # Clinical Evidence APIs (optional — all work without keys at lower rate limits)
 NCBI_API_KEY=          # PubMed: 3 req/s → 10 req/s
@@ -182,7 +190,10 @@ The agent uses a **Hermes-inspired identity and skills layer** (not the separate
 - **SOUL.md**: Loaded into the assistant's system prompt for identity, behavior rules, and PHI boundaries
 - **USER.md**: User-editable profile and preferences, loaded as context
 - **MEMORY.md**: Durable, non-sensitive workspace memory, loaded as context
-- **`skills/*/SKILL.md`**: Personal-assistant and clinical-evidence workflows loaded into the prompt
+- **`skills/*/SKILL.md`**: Relevant workflows are selected per request (personal assistant by default; clinical evidence when detected), rather than loading every skill every time
+- **Thinking Mode**: Per-user, off by default; turn on with `/think on` for respectful assumption-testing and decision support, or use `GET /api/preferences/{user_id}` and `PUT /api/preferences/thinking-mode` from an API client
+- **Learning proposals**: Memory changes require explicit approval. Skill proposals are review-only and require a maintainer code change; the bot never edits skill files.
 - **SQLite memories**: Reviewable with `/memory` and deletable with `/forget <key>`
+- **Temporal cadence**: `/brief on` opts in to 06:00 morning intent, 21:00 evening ledger, Thursday 20:00 calibration, and last-day-of-month 20:00 audit in the selected timezone (default `Asia/Riyadh`).
 
-The documents are re-read for new requests, so edits take effect without changing Python code. Keep secrets and patient-identifiable information out of these files: workspace context and saved memories are included in prompts sent to the configured OpenCode provider. Live clinical tools independently block queries flagged as patient-identifiable.
+The documents are re-read for new requests, so they can be edited without changing Python code; production changes still require a redeploy. Keep secrets and patient-identifiable information out of these files: workspace context and saved memories are included in prompts sent to the configured OpenCode provider. Live clinical tools independently block queries flagged as patient-identifiable. Scheduled messages are opt-in and omit task/calendar items flagged by the PHI heuristic.

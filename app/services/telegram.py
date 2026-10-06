@@ -1,7 +1,9 @@
 import asyncio
 import logging
 import re
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
 
@@ -151,19 +153,29 @@ class TelegramService:
             "/calendar — list upcoming events\n"
             "/memory — review saved memories\n"
             "/forget <key> — delete a saved memory\n"
+            "/proposals, /approve <id>, /reject <id> — review learning proposals\n"
+            "/think on|off|status — toggle constructive Thinking Mode\n"
+            "/brief on|off|status — opt into or pause proactive reviews\n"
+            "/brief morning HH:MM | evening HH:MM | timezone <IANA> — set cadence\n"
             "/evidence <question> — search current clinical evidence\n"
             "/drugs <name> — search general openFDA drug information\n"
             "/clear — clear this chat's conversation history\n\n"
+            "Briefs are opt-in: daily at 06:00 and 21:00, Thursday calibration, and month-end audit.\n"
             "For privacy, the bot only accepts approved Telegram user IDs in private chats."
         )
 
-    def _status_text(self) -> str:
+    def _status_text(self, user_id: Optional[int] = None) -> str:
         if settings.telegram_allow_all_users:
             access = "Public access enabled"
         elif settings.telegram_allowed_user_ids:
             access = f"Private allowlist enabled ({len(settings.telegram_allowed_user_ids)} user(s))"
         else:
             access = "Private; no authorized user IDs configured"
+        mode = db.get_preference(str(user_id or "default"), "thinking_mode", "off")
+        briefs = db.get_preference(str(user_id or "default"), "briefs_enabled", "false")
+        timezone_name = db.get_preference(
+            str(user_id or "default"), "timezone", settings.user_timezone
+        )
         return (
             "Personal AI Agent status\n"
             f"Provider: OpenCode ({settings.opencode_mode})\n"
@@ -171,7 +183,109 @@ class TelegramService:
             f"Telegram: {'configured' if self.is_configured else 'not configured'}\n"
             f"Polling: {'running' if self.is_polling else 'not running'}\n"
             f"Access: {access}\n"
+            f"Thinking mode: {mode}\n"
+            f"Proactive briefs: {'on' if briefs.lower() == 'true' else 'off'} ({timezone_name})\n"
             f"Google Workspace live: {google_workspace.is_live_configured}"
+        )
+
+    @staticmethod
+    def _think_command(user_id: int, argument: str) -> str:
+        mode = (argument or "status").strip().lower()
+        if mode in {"on", "enable"}:
+            db.set_preference(str(user_id), "thinking_mode", "on")
+            return (
+                "Thinking Mode is ON. I will respectfully stress-test strategic ideas and show "
+                "key assumptions, tradeoffs, and alternatives—not private chain-of-thought."
+            )
+        if mode in {"off", "disable"}:
+            db.set_preference(str(user_id), "thinking_mode", "off")
+            return "Thinking Mode is OFF. Routine requests stay direct and concise."
+        if mode == "status":
+            current = db.get_preference(str(user_id), "thinking_mode", "off") or "off"
+            return f"Thinking Mode is {current.upper()}. Use /think on or /think off to change it."
+        return "Usage: /think on, /think off, or /think status."
+
+    @staticmethod
+    def _brief_command(user_id: int, argument: str) -> str:
+        parts = argument.split(maxsplit=1)
+        action = parts[0].lower() if parts else "status"
+        value = parts[1].strip() if len(parts) > 1 else ""
+        uid = str(user_id)
+
+        if action in {"on", "enable"}:
+            db.set_preference(uid, "briefs_enabled", "true")
+            return (
+                "Proactive reviews are ON: morning intent at 06:00, evening ledger at 21:00, "
+                "Thursday calibration at 20:00, and month-end audit at 20:00. "
+                "Use /brief off to pause them."
+            )
+        if action in {"off", "disable"}:
+            db.set_preference(uid, "briefs_enabled", "false")
+            return "Proactive reviews are OFF. Use /brief on to opt in again."
+        if action == "status":
+            enabled = (db.get_preference(uid, "briefs_enabled", "false") or "false").lower()
+            morning = db.get_preference(uid, "morning_brief_time", "06:00")
+            evening = db.get_preference(uid, "evening_brief_time", "21:00")
+            timezone_name = db.get_preference(uid, "timezone", settings.user_timezone)
+            return (
+                f"Proactive reviews are {'ON' if enabled == 'true' else 'OFF'}.\n"
+                f"Morning: {morning}\nEvening: {evening}\n"
+                f"Weekly: Thursday 20:00\nMonthly: last day 20:00\nTimezone: {timezone_name}"
+            )
+        if action in {"morning", "evening"}:
+            try:
+                normalized = datetime.strptime(value, "%H:%M").strftime("%H:%M")
+            except ValueError:
+                return f"Use 24-hour time, e.g. /brief {action} 06:30."
+            preference_key = "morning_brief_time" if action == "morning" else "evening_brief_time"
+            db.set_preference(uid, preference_key, normalized)
+            return f"{action.title()} brief time set to {normalized}. Use /brief on to enable scheduled reviews."
+        if action == "timezone":
+            try:
+                timezone_name = ZoneInfo(value).key
+            except (ZoneInfoNotFoundError, ValueError):
+                return "Use a valid IANA timezone such as Asia/Riyadh or UTC."
+            db.set_preference(uid, "timezone", timezone_name)
+            return f"Brief timezone set to {timezone_name}."
+        return (
+            "Usage: /brief on|off|status, /brief morning HH:MM, "
+            "/brief evening HH:MM, or /brief timezone <IANA timezone>."
+        )
+
+    @staticmethod
+    def _proposal_command(user_id: int, command: str, argument: str) -> str:
+        uid = str(user_id)
+        if command == "proposals":
+            proposals = db.list_proposals(uid, status="pending")
+            if not proposals:
+                return "No pending proposals. I will never activate a memory or skill change without review."
+            lines = ["Pending learning proposals:"]
+            for proposal in proposals[:10]:
+                label = "memory" if proposal["proposal_type"] == "memory" else "skill (manual code review required)"
+                lines.append(
+                    f"\n#{proposal['id']} — {label}: {proposal['target']}\n"
+                    f"{proposal['proposed_value'][:700]}\n"
+                    f"Reason: {proposal['rationale'][:300]}"
+                )
+            lines.append("\nUse /approve <id> or /reject <id>.")
+            return "".join(lines)
+
+        try:
+            proposal_id = int(argument.strip())
+        except ValueError:
+            return f"Usage: /{command} <proposal id>. Use /proposals to review pending items."
+        proposal = db.review_proposal(uid, proposal_id, "approve" if command == "approve" else "reject")
+        if not proposal:
+            return f"No proposal #{proposal_id} was found for your account."
+        if proposal["status"] != ("approved" if command == "approve" else "rejected"):
+            return f"Proposal #{proposal_id} is already {proposal['status']}."
+        if command == "reject":
+            return f"Proposal #{proposal_id} rejected; no changes were applied."
+        if proposal["proposal_type"] == "memory":
+            return f"Proposal #{proposal_id} approved and saved as memory '{proposal['target']}'."
+        return (
+            f"Skill proposal #{proposal_id} approved for code review. The bot did not edit any files; "
+            "a maintainer must apply the change through a reviewed code update."
         )
 
     async def _process_text(
@@ -181,10 +295,16 @@ class TelegramService:
         if command in {"start", "help"}:
             return self._help_text()
         if command == "status":
-            return self._status_text()
+            return self._status_text(user_id)
+        if command == "think":
+            return self._think_command(user_id, argument)
+        if command == "brief":
+            return self._brief_command(user_id, argument)
+        if command in {"proposals", "approve", "reject"}:
+            return self._proposal_command(user_id, command, argument)
         if command == "clear":
             db.clear_conversation(session_id)
-            return "Conversation history cleared. Saved memories and tasks were not changed."
+            return "Conversation history cleared. Saved memories, mode, and schedule preferences were not changed."
         if command == "tasks":
             tasks = db.list_tasks()
             if not tasks:

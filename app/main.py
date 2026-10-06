@@ -11,6 +11,7 @@ from app.config import settings
 from app.database import db
 from app.services.google_workspace import google_workspace
 from app.services.opencode import opencode_service
+from app.services.scheduler import brief_scheduler
 from app.services.telegram import telegram_service
 from app.tools.clinical_evidence_search import search_clinical_evidence, search_drugs
 
@@ -19,9 +20,11 @@ from app.tools.clinical_evidence_search import search_clinical_evidence, search_
 async def lifespan(_app: FastAPI):
     db.init_db()
     await telegram_service.start_polling_if_enabled()
+    await brief_scheduler.start_if_enabled()
     try:
         yield
     finally:
+        await brief_scheduler.stop()
         await telegram_service.stop_polling()
 
 
@@ -61,6 +64,11 @@ class TaskCreateRequest(BaseModel):
 class MemorySaveRequest(BaseModel):
     key: str = Field(min_length=1, max_length=100)
     value: str = Field(min_length=1, max_length=5000)
+
+
+class ThinkingModeRequest(BaseModel):
+    user_id: str = Field(default="default", min_length=1, max_length=100)
+    enabled: bool
 
 
 class CalendarEventCreateRequest(BaseModel):
@@ -134,6 +142,11 @@ async def api_status():
             "authorized_user_count": len(settings.telegram_allowed_user_ids),
             "public_access": settings.telegram_allow_all_users,
         },
+        "brief_scheduler": {
+            "running": brief_scheduler.is_running,
+            "opt_in_required": True,
+            "default_timezone": settings.user_timezone,
+        },
         "google_workspace": {
             "live_configured": google_workspace.is_live_configured,
             "calendar_id": settings.google_calendar_id,
@@ -143,6 +156,21 @@ async def api_status():
             "sqlite_path": db.db_path,
         },
     }
+
+
+@app.get("/api/preferences/{user_id}")
+async def get_agent_preferences(user_id: str):
+    return {
+        "user_id": user_id,
+        "thinking_mode": db.get_preference(user_id, "thinking_mode", "off") or "off",
+    }
+
+
+@app.put("/api/preferences/thinking-mode")
+async def set_thinking_mode(payload: ThinkingModeRequest):
+    mode = "on" if payload.enabled else "off"
+    db.set_preference(payload.user_id, "thinking_mode", mode)
+    return {"user_id": payload.user_id, "thinking_mode": mode}
 
 
 @app.get("/api/models")

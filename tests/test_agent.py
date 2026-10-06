@@ -32,6 +32,26 @@ def test_health_and_status_only_opencode():
     assert "kimi" not in status_data
 
 
+def test_thinking_mode_preferences_api():
+    initial = client.get("/api/preferences/web-test-user")
+    assert initial.status_code == 200
+    assert initial.json()["thinking_mode"] == "off"
+
+    enabled = client.put(
+        "/api/preferences/thinking-mode",
+        json={"user_id": "web-test-user", "enabled": True},
+    )
+    assert enabled.status_code == 200
+    assert enabled.json()["thinking_mode"] == "on"
+    assert client.get("/api/preferences/web-test-user").json()["thinking_mode"] == "on"
+
+    disabled = client.put(
+        "/api/preferences/thinking-mode",
+        json={"user_id": "web-test-user", "enabled": False},
+    )
+    assert disabled.json()["thinking_mode"] == "off"
+
+
 def test_tasks_and_memories():
     # Create task
     res = client.post("/api/tasks", json={"title": "Review OpenCode deployment"})
@@ -81,7 +101,12 @@ def test_chat_and_telegram_webhook(monkeypatch):
     monkeypatch.setattr(settings, "telegram_allowed_user_ids", [42])
     monkeypatch.setattr(settings, "telegram_allow_all_users", False)
 
-    async def mock_chat_via_api(session_id: str, active_model: str):
+    async def mock_chat_via_api(
+        session_id: str,
+        active_model: str,
+        user_id: str = "default",
+        user_message: str = "",
+    ):
         return {
             "reply": "Hello from OpenCode!",
             "model": f"opencode/{active_model}",

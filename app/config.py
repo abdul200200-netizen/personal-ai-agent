@@ -83,6 +83,11 @@ class Settings:
         ).strip()
     )
 
+    # Workspace time zone used by proactive briefs (IANA TZ database name)
+    user_timezone: str = field(
+        default_factory=lambda: os.getenv("USER_TIMEZONE", "Asia/Riyadh").strip() or "Asia/Riyadh"
+    )
+
     # Database & Server
     sqlite_db_path: str = field(
         default_factory=lambda: os.getenv("SQLITE_DB_PATH", "data/agent.db").strip()

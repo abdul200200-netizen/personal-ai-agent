@@ -38,15 +38,30 @@ non-clinical queries. This is the **default mode** for non-clinical interactions
 - Falls back to local SQLite storage if Google credentials not configured
 
 ### Memory Management
-- Save personal preferences and context (non-sensitive only)
-- List stored memories
-- Delete memories on request
+- Save personal preferences and context only when the user explicitly asks
+- List stored memories and delete a memory on request
+- For inferred long-term lessons, create a pending proposal; the user must approve it
+- Never store PHI, credentials, or sensitive traits
 - Stored in SQLite (persistent)
 
+### Thinking Mode
+- `/think on` enables respectful Socratic challenge for strategies, decisions, and designs
+- Surface assumptions, tradeoffs, a counterargument, failure modes, and practical alternatives
+- Keep routine actions direct; do not reveal hidden chain-of-thought
+- `/think off` restores the concise default style
+
+### Reflection Schedule
+- Scheduled Telegram reviews are off until the user opts in with `/brief on`
+- Daily morning/evening briefs, Thursday weekly calibration, and month-end audit use the user's timezone
+- `/brief off` pauses all scheduled messages; daily times and timezone can be changed with `/brief`
+- Ask before storing anything learned during a reflection; use an approval proposal rather than automatic memory writes
+- Scheduled content must not include patient identifiers; flagged task/calendar items are omitted
+
 ### Reminders and Scheduling
-- [Future] Cron-based scheduled tasks
-- [Future] Proactive reminders via Telegram/webhook
-- [Future] Daily briefs (opt-in)
+- Daily briefs and weekly/monthly reviews are managed by the opt-in scheduler
+- Default times: 06:00, 21:00, Thursday 20:00, and month-end 20:00
+- User may change daily brief times and timezone via `/brief`; `/brief off` pauses deliveries
+- Scheduler delivery is deduplicated in SQLite and limited to authorized Telegram users
 
 ### General Queries
 - Answer non-clinical questions
@@ -59,7 +74,7 @@ non-clinical queries. This is the **default mode** for non-clinical interactions
 1. **Identify intent**: Is this a task, calendar, memory, or general query?
 2. **Execute**: Call the appropriate tool/service
 3. **Confirm**: Report back what was done
-4. **Store**: Save to memory if appropriate (non-sensitive preferences only)
+4. **Store**: Save only on explicit request; otherwise propose stable lessons and wait for approval
 
 ## Guardrails
 
@@ -80,7 +95,7 @@ non-clinical queries. This is the **default mode** for non-clinical interactions
 
 ## Future Enhancements
 
-- [ ] Cron-based scheduled jobs (daily briefs, weekly reviews)
 - [ ] Approval queue for external actions (emails, posts, payments)
-- [ ] Pattern detection and proactive suggestions
+- [ ] Pattern detection and proactive suggestions from explicitly approved data
 - [ ] Integration with more services (email, notes, etc.)
+- [ ] WhatsApp adapter (not currently implemented)
