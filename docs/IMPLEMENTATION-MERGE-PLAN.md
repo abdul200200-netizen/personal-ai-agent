@@ -50,18 +50,21 @@ This document tracks the build plan for unifying the clinical evidence layer wit
 
 ## 🔄 In Progress / Next Steps
 
-### Phase 5: Advanced Memory (Planned)
-- [ ] FTS5 episodic memory upgrade (SQLite full-text search)
-- [ ] Memory provider interface
-- [ ] Memory inspect/edit/delete API
-- [ ] Conversation history with semantic context
+### Phase 5: Workspace Context and Memory Proposals (Partial)
+- [x] Load SOUL, USER, and MEMORY into the OpenCode prompt
+- [x] Progressively select personal-assistant or clinical-evidence skill context per request
+- [x] Add a human-reviewed memory/skill proposal queue; PHI/credential checks apply
+- [x] Inspect, approve, and reject proposals through Telegram; delete active memories on request
+- [ ] FTS5 episodic memory and semantic retrieval
+- [ ] Per-user memory/task data isolation (current installation is intended for one owner)
 
-### Phase 6: Scheduler and Cron (Planned)
-- [ ] Port scheduler from old agent (engine/scheduler.py → app/scheduler/)
-- [ ] Idempotent job execution with cycle-based deduplication
-- [ ] Optional clinical evidence brief (opt-in)
-- [ ] Weekly specialty literature/trial update
-- [ ] Approval queue for external actions
+### Phase 6: Scheduler and Cadence (Initial implementation)
+- [x] Opt-in Telegram scheduler with persisted preferences and idempotent deliveries
+- [x] Daily morning intent and evening ledger, weekly Thursday calibration, month-end audit
+- [x] User-selectable daily times and IANA timezone; missed jobs are skipped and transient send failures retry
+- [x] Privacy filter omits task/calendar entries flagged by the PHI heuristic
+- [ ] Scheduler UI and delivery history endpoint
+- [ ] Optional evidence-update subscriptions (not enabled; require a separate opt-in design)
 
 ### Phase 7: Old Agent Porting (Planned)
 - [ ] Port `memory/GLOBAL_RULES.md` from addn200200-svg
@@ -70,10 +73,17 @@ This document tracks the build plan for unifying the clinical evidence layer wit
 - [ ] Port evaluation test cases
 - [ ] Adapt Telegram/Google connectors (already exists in new agent)
 
-### Phase 8: Learning Loop (Planned)
-- [ ] Agent proposes memory/skill updates
-- [ ] Human approves activation
-- [ ] Self-improving loop with evaluation
+### Phase 8: Human-Reviewed Learning Loop (Initial implementation)
+- [x] Agent can propose a memory or skill update without applying it
+- [x] Memory changes become active only after explicit user approval
+- [x] Approved skill changes remain proposals for a maintainer code review; no runtime file writes
+- [ ] Add proposal evaluation and audit reporting
+
+### Phase 9: Thinking Mode
+- [x] Per-user `/think on|off|status` preference
+- [x] Constructive assumption testing, alternatives, failure modes, and decision consequences
+- [x] Keep hidden chain-of-thought private; expose concise rationale only
+- [ ] Add Web dashboard control
 
 ---
 
@@ -99,8 +109,10 @@ personal-ai-agent/
 │   │       ├── clinicaltrials.py        # ClinicalTrials.gov API v2
 │   │       └── openfda.py              # openFDA drug data
 │   ├── services/
-│   │   ├── opencode.py                  # OpenCode AI engine
-│   │   ├── telegram.py                  # Telegram integration
+│   │   ├── opencode.py                  # OpenCode AI engine, thinking mode, tools
+│   │   ├── identity.py                  # Workspace context and progressive skill loading
+│   │   ├── telegram.py                  # Telegram commands, private chat interface
+│   │   ├── scheduler.py                 # Opt-in cadence and proactive briefs
 │   │   └── google_workspace.py          # Google Calendar/Sheets
 │   └── static/
 │       └── index.html                   # Web dashboard

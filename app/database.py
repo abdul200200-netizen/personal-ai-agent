@@ -2,10 +2,15 @@ import json
 import os
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from app.config import settings
+from app.core.policy import policy_engine
+
+
+class MemoryPolicyError(ValueError):
+    """Raised when a memory write contains PHI or credentials."""
 
 
 def _utc_now() -> str:
@@ -83,6 +88,42 @@ class Database:
                     sheet_range TEXT NOT NULL,
                     values_json TEXT NOT NULL,
                     created_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS telegram_processed_updates (
+                    update_id INTEGER PRIMARY KEY,
+                    processed_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS agent_preferences (
+                    user_id TEXT NOT NULL,
+                    key TEXT NOT NULL,
+                    value TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (user_id, key)
+                );
+
+                CREATE TABLE IF NOT EXISTS memory_proposals (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id TEXT NOT NULL,
+                    proposal_type TEXT NOT NULL CHECK (proposal_type IN ('memory', 'skill')),
+                    target TEXT NOT NULL,
+                    proposed_value TEXT NOT NULL,
+                    rationale TEXT NOT NULL DEFAULT '',
+                    source_session_id TEXT,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    created_at TEXT NOT NULL,
+                    reviewed_at TEXT
+                );
+
+                CREATE TABLE IF NOT EXISTS scheduled_job_runs (
+                    user_id TEXT NOT NULL,
+                    job_key TEXT NOT NULL,
+                    occurrence_key TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'sending',
+                    attempts INTEGER NOT NULL DEFAULT 1,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (user_id, job_key, occurrence_key)
                 );
                 """
             )
@@ -195,8 +236,235 @@ class Database:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    # Telegram webhook deduplication
+    def claim_telegram_update(self, update_id: int) -> bool:
+        """Atomically claim an update so webhook retries cannot repeat side effects."""
+        now = datetime.now(timezone.utc)
+        cutoff = (now - timedelta(days=30)).isoformat()
+        with self.connect() as conn:
+            cursor = conn.execute(
+                "INSERT OR IGNORE INTO telegram_processed_updates (update_id, processed_at) VALUES (?, ?)",
+                (int(update_id), now.isoformat()),
+            )
+            conn.execute(
+                "DELETE FROM telegram_processed_updates WHERE processed_at < ?", (cutoff,)
+            )
+            return cursor.rowcount == 1
+
+    # Per-user agent preferences and opt-in scheduled briefs
+    def get_preference(self, user_id: str, key: str, default: Optional[str] = None) -> Optional[str]:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT value FROM agent_preferences WHERE user_id = ? AND key = ?",
+                (str(user_id), key),
+            ).fetchone()
+        return row["value"] if row else default
+
+    def set_preference(self, user_id: str, key: str, value: str) -> None:
+        now = _utc_now()
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO agent_preferences (user_id, key, value, updated_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(user_id, key) DO UPDATE SET
+                    value = excluded.value, updated_at = excluded.updated_at
+                """,
+                (str(user_id), key, str(value), now),
+            )
+
+    def list_brief_recipients(self) -> List[str]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT user_id FROM agent_preferences WHERE key = 'briefs_enabled' AND lower(value) = 'true'"
+            ).fetchall()
+        return [row["user_id"] for row in rows]
+
+    # Human-reviewed learning proposals. Memory writes require explicit approval.
+    def create_proposal(
+        self,
+        user_id: str,
+        proposal_type: str,
+        target: str,
+        proposed_value: str,
+        rationale: str = "",
+        source_session_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        target = (target or "").strip()
+        proposed_value = (proposed_value or "").strip()
+        rationale = (rationale or "").strip()
+        if proposal_type not in {"memory", "skill"}:
+            raise ValueError("Proposal type must be 'memory' or 'skill'.")
+        if not target or not proposed_value:
+            raise ValueError("Proposal target and proposed value are required.")
+        if len(rationale) > 1000:
+            raise ValueError("Proposal rationale must be at most 1000 characters.")
+        if proposal_type == "memory" and (len(target) > 100 or len(proposed_value) > 5000):
+            raise ValueError("Memory proposal exceeds the allowed size.")
+        if proposal_type == "skill" and (
+            target not in {"personal-assistant", "clinical-evidence"}
+            or len(proposed_value) > 10_000
+        ):
+            raise ValueError("Unknown skill or skill proposal exceeds the allowed size.")
+
+        decision = policy_engine.check_memory_write(
+            target, f"{proposed_value}\n{rationale}"
+        )
+        if not decision.get("allowed"):
+            raise MemoryPolicyError(decision.get("warning") or "Proposal rejected by policy.")
+
+        now = _utc_now()
+        with self.connect() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO memory_proposals
+                    (user_id, proposal_type, target, proposed_value, rationale,
+                     source_session_id, status, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)
+                """,
+                (str(user_id), proposal_type, target, proposed_value, rationale,
+                 source_session_id, now),
+            )
+            proposal_id = cursor.lastrowid
+        return {
+            "id": proposal_id,
+            "user_id": str(user_id),
+            "proposal_type": proposal_type,
+            "target": target,
+            "proposed_value": proposed_value,
+            "rationale": rationale,
+            "status": "pending",
+            "created_at": now,
+        }
+
+    def list_proposals(
+        self, user_id: str, status: Optional[str] = "pending", limit: int = 20
+    ) -> List[Dict[str, Any]]:
+        with self.connect() as conn:
+            if status:
+                rows = conn.execute(
+                    """
+                    SELECT * FROM memory_proposals WHERE user_id = ? AND status = ?
+                    ORDER BY id DESC LIMIT ?
+                    """,
+                    (str(user_id), status, limit),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM memory_proposals WHERE user_id = ? ORDER BY id DESC LIMIT ?",
+                    (str(user_id), limit),
+                ).fetchall()
+        return [dict(row) for row in rows]
+
+    def review_proposal(
+        self, user_id: str, proposal_id: int, decision: str
+    ) -> Optional[Dict[str, Any]]:
+        if decision not in {"approve", "reject"}:
+            raise ValueError("Decision must be 'approve' or 'reject'.")
+        now = _utc_now()
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM memory_proposals WHERE id = ? AND user_id = ?",
+                (int(proposal_id), str(user_id)),
+            ).fetchone()
+            if not row:
+                return None
+            proposal = dict(row)
+            if proposal["status"] != "pending":
+                return proposal
+
+            new_status = "approved" if decision == "approve" else "rejected"
+            if decision == "approve" and proposal["proposal_type"] == "memory":
+                policy_result = policy_engine.check_memory_write(
+                    proposal["target"], proposal["proposed_value"]
+                )
+                if not policy_result.get("allowed"):
+                    raise MemoryPolicyError(
+                        policy_result.get("warning") or "Memory proposal rejected by policy."
+                    )
+                conn.execute(
+                    """
+                    INSERT INTO memories (key, value, updated_at) VALUES (?, ?, ?)
+                    ON CONFLICT(key) DO UPDATE SET
+                        value = excluded.value, updated_at = excluded.updated_at
+                    """,
+                    (proposal["target"], proposal["proposed_value"], now),
+                )
+
+            conn.execute(
+                "UPDATE memory_proposals SET status = ?, reviewed_at = ? WHERE id = ?",
+                (new_status, now, int(proposal_id)),
+            )
+            proposal["status"] = new_status
+            proposal["reviewed_at"] = now
+            return proposal
+
+    # Scheduled brief idempotency and retry tracking
+    def claim_scheduled_job(
+        self, user_id: str, job_key: str, occurrence_key: str, max_attempts: int = 3
+    ) -> bool:
+        now = _utc_now()
+        stale_cutoff = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+        with self.connect() as conn:
+            cursor = conn.execute(
+                """
+                INSERT OR IGNORE INTO scheduled_job_runs
+                    (user_id, job_key, occurrence_key, status, attempts, updated_at)
+                VALUES (?, ?, ?, 'sending', 1, ?)
+                """,
+                (str(user_id), job_key, occurrence_key, now),
+            )
+            if cursor.rowcount == 1:
+                return True
+            row = conn.execute(
+                """
+                SELECT status, attempts, updated_at FROM scheduled_job_runs
+                WHERE user_id = ? AND job_key = ? AND occurrence_key = ?
+                """,
+                (str(user_id), job_key, occurrence_key),
+            ).fetchone()
+            retryable_failure = row and row["status"] == "failed"
+            stale_claim = row and row["status"] == "sending" and row["updated_at"] < stale_cutoff
+            if row and (retryable_failure or stale_claim) and row["attempts"] < max_attempts:
+                cursor = conn.execute(
+                    """
+                    UPDATE scheduled_job_runs
+                    SET status = 'sending', attempts = attempts + 1, updated_at = ?
+                    WHERE user_id = ? AND job_key = ? AND occurrence_key = ?
+                      AND status = ? AND updated_at = ?
+                    """,
+                    (now, str(user_id), job_key, occurrence_key, row["status"], row["updated_at"]),
+                )
+                return cursor.rowcount == 1
+        return False
+
+    def finish_scheduled_job(
+        self, user_id: str, job_key: str, occurrence_key: str, status: str
+    ) -> None:
+        if status not in {"sent", "failed", "skipped"}:
+            raise ValueError("Invalid scheduled job status.")
+        with self.connect() as conn:
+            conn.execute(
+                """
+                UPDATE scheduled_job_runs SET status = ?, updated_at = ?
+                WHERE user_id = ? AND job_key = ? AND occurrence_key = ?
+                """,
+                (status, _utc_now(), str(user_id), job_key, occurrence_key),
+            )
+
     # Memories
     def save_memory(self, key: str, value: str) -> Dict[str, Any]:
+        key = (key or "").strip()
+        value = (value or "").strip()
+        if not key or not value:
+            raise ValueError("Memory key and value are required.")
+        if len(key) > 100 or len(value) > 5000:
+            raise ValueError("Memory key must be at most 100 characters and value at most 5000.")
+
+        decision = policy_engine.check_memory_write(key, value)
+        if not decision.get("allowed"):
+            raise MemoryPolicyError(decision.get("warning") or "Memory write rejected by policy.")
+
         now = _utc_now()
         with self.connect() as conn:
             conn.execute(

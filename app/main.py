@@ -11,6 +11,7 @@ from app.config import settings
 from app.database import db
 from app.services.google_workspace import google_workspace
 from app.services.opencode import opencode_service
+from app.services.scheduler import brief_scheduler
 from app.services.telegram import telegram_service
 from app.tools.clinical_evidence_search import search_clinical_evidence, search_drugs
 
@@ -19,9 +20,11 @@ from app.tools.clinical_evidence_search import search_clinical_evidence, search_
 async def lifespan(_app: FastAPI):
     db.init_db()
     await telegram_service.start_polling_if_enabled()
+    await brief_scheduler.start_if_enabled()
     try:
         yield
     finally:
+        await brief_scheduler.stop()
         await telegram_service.stop_polling()
 
 
@@ -59,8 +62,13 @@ class TaskCreateRequest(BaseModel):
 
 
 class MemorySaveRequest(BaseModel):
-    key: str
-    value: str
+    key: str = Field(min_length=1, max_length=100)
+    value: str = Field(min_length=1, max_length=5000)
+
+
+class ThinkingModeRequest(BaseModel):
+    user_id: str = Field(default="default", min_length=1, max_length=100)
+    enabled: bool
 
 
 class CalendarEventCreateRequest(BaseModel):
@@ -88,13 +96,13 @@ class ClinicalEvidenceSearchRequest(BaseModel):
     date_from: Optional[str] = None
     date_to: Optional[str] = None
     study_types: Optional[List[str]] = None
-    max_results_per_source: int = 5
+    max_results_per_source: int = Field(default=5, ge=1, le=10)
 
 
 class DrugSearchRequest(BaseModel):
     drug_name: str
     include_events: bool = False
-    max_results: int = 5
+    max_results: int = Field(default=5, ge=1, le=10)
 
 
 # ---------------------------------------------------------------------------
@@ -129,6 +137,15 @@ async def api_status():
         "telegram": {
             "configured": telegram_service.is_configured,
             "polling": settings.telegram_polling,
+            "polling_enabled": settings.telegram_polling,
+            "polling_running": telegram_service.is_polling,
+            "authorized_user_count": len(settings.telegram_allowed_user_ids),
+            "public_access": settings.telegram_allow_all_users,
+        },
+        "brief_scheduler": {
+            "running": brief_scheduler.is_running,
+            "opt_in_required": True,
+            "default_timezone": settings.user_timezone,
         },
         "google_workspace": {
             "live_configured": google_workspace.is_live_configured,
@@ -139,6 +156,21 @@ async def api_status():
             "sqlite_path": db.db_path,
         },
     }
+
+
+@app.get("/api/preferences/{user_id}")
+async def get_agent_preferences(user_id: str):
+    return {
+        "user_id": user_id,
+        "thinking_mode": db.get_preference(user_id, "thinking_mode", "off") or "off",
+    }
+
+
+@app.put("/api/preferences/thinking-mode")
+async def set_thinking_mode(payload: ThinkingModeRequest):
+    mode = "on" if payload.enabled else "off"
+    db.set_preference(payload.user_id, "thinking_mode", mode)
+    return {"user_id": payload.user_id, "thinking_mode": mode}
 
 
 @app.get("/api/models")
@@ -206,8 +238,18 @@ async def get_memories():
 
 @app.post("/api/memories")
 async def save_memory(payload: MemorySaveRequest):
-    mem = db.save_memory(key=payload.key, value=payload.value)
+    try:
+        mem = db.save_memory(key=payload.key, value=payload.value)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"memory": mem}
+
+
+@app.delete("/api/memories/{key}")
+async def delete_memory(key: str):
+    if not db.delete_memory(key):
+        raise HTTPException(status_code=404, detail="Memory not found")
+    return {"status": "deleted", "key": key}
 
 
 # Google Calendar
@@ -328,6 +370,16 @@ async def telegram_webhook(
     update: Dict[str, Any],
     x_telegram_bot_api_secret_token: Optional[str] = Header(default=None),
 ):
+    if telegram_service.is_configured and settings.telegram_polling:
+        raise HTTPException(
+            status_code=409,
+            detail="Telegram webhook is disabled while long polling is enabled.",
+        )
+    if telegram_service.is_configured and not settings.telegram_webhook_secret:
+        raise HTTPException(
+            status_code=503,
+            detail="Set TELEGRAM_WEBHOOK_SECRET before enabling Telegram webhooks.",
+        )
     if settings.telegram_webhook_secret:
         if x_telegram_bot_api_secret_token != settings.telegram_webhook_secret:
             raise HTTPException(status_code=403, detail="Invalid webhook secret token")

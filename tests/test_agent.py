@@ -8,6 +8,7 @@ _tmp_db = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
 _tmp_db.close()
 os.environ["SQLITE_DB_PATH"] = _tmp_db.name
 
+from app.config import settings  # noqa: E402
 from app.main import app  # noqa: E402
 from app.services.opencode import opencode_service  # noqa: E402
 
@@ -29,6 +30,26 @@ def test_health_and_status_only_opencode():
     assert "gemini" not in status_data
     assert "bedrock" not in status_data
     assert "kimi" not in status_data
+
+
+def test_thinking_mode_preferences_api():
+    initial = client.get("/api/preferences/web-test-user")
+    assert initial.status_code == 200
+    assert initial.json()["thinking_mode"] == "off"
+
+    enabled = client.put(
+        "/api/preferences/thinking-mode",
+        json={"user_id": "web-test-user", "enabled": True},
+    )
+    assert enabled.status_code == 200
+    assert enabled.json()["thinking_mode"] == "on"
+    assert client.get("/api/preferences/web-test-user").json()["thinking_mode"] == "on"
+
+    disabled = client.put(
+        "/api/preferences/thinking-mode",
+        json={"user_id": "web-test-user", "enabled": False},
+    )
+    assert disabled.json()["thinking_mode"] == "off"
 
 
 def test_tasks_and_memories():
@@ -77,7 +98,15 @@ def test_calendar_and_sheets_endpoints():
 
 
 def test_chat_and_telegram_webhook(monkeypatch):
-    async def mock_chat_via_api(session_id: str, active_model: str):
+    monkeypatch.setattr(settings, "telegram_allowed_user_ids", [42])
+    monkeypatch.setattr(settings, "telegram_allow_all_users", False)
+
+    async def mock_chat_via_api(
+        session_id: str,
+        active_model: str,
+        user_id: str = "default",
+        user_message: str = "",
+    ):
         return {
             "reply": "Hello from OpenCode!",
             "model": f"opencode/{active_model}",

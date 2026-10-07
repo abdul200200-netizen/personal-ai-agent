@@ -46,7 +46,7 @@ BotFather سيعطيك token مثل:
 1. اضغط: `New Project`
 2. اختر: `Deploy from GitHub repo`
 3. اختر المستودع: `abdul200200-netizen/personal-ai-agent`
-4. اختر الـ branch: `arena/bc8aa06a-personal-ai-agent`
+4. للإنتاج اختر `main` بعد دمج التغييرات ومراجعتها. لا تستخدم فرع قديم؛ للاختبار المؤقت اختر فرع الـ PR الحالي ثم ارجع إلى `main` بعد الدمج.
 
 ### الخطوة 3: إضافة Environment Variables
 
@@ -63,12 +63,15 @@ OPENCODE_MODEL=big-pickle
 
 # ============= Telegram Bot =============
 TELEGRAM_BOT_TOKEN=7123456789:ABCdefGHIjklMNOpqrsTUVwxyz
-TELEGRAM_WEBHOOK_SECRET=your_random_secret_here_123
+TELEGRAM_WEBHOOK_SECRET=replace_with_a_long_random_secret
 TELEGRAM_ALLOWED_USER_IDS=123456789
+TELEGRAM_ALLOW_ALL_USERS=false
 TELEGRAM_POLLING=true
+# لا تحتاج TELEGRAM_CHAT_ID في وضع polling؛ البوت يرد على المحادثة الخاصة الواردة.
 
 # ============= Database =============
 SQLITE_DB_PATH=/app/data/agent.db
+USER_TIMEZONE=Asia/Riyadh
 HOST=0.0.0.0
 PORT=8000
 
@@ -79,6 +82,8 @@ PORT=8000
 CLINICAL_EVIDENCE_CACHE_TTL=86400
 RETRIEVAL_DEFAULT_WINDOW_YEARS=5
 ```
+
+**الخصوصية:** استخدم رقم المستخدم الخاص بك فقط في `TELEGRAM_ALLOWED_USER_IDS`. أي IDs تضيفها تشارك نفس المهام والذكريات والتقويم؛ لا تضف مستخدمين إلا إذا كنت تقصد مشاركة مساحة العمل. لا تحفظ مفاتيح أو بيانات مرضى في `USER.md` أو `MEMORY.md` أو قاعدة البيانات؛ سياق مساحة العمل والذكريات يُرسل إلى مزود OpenCode المضبوط.
 
 ### الخطوة 4: إضافة Persistent Volume (للقاعدة)
 1. في Railway dashboard، اذهب إلى: **Settings** → **Networking**
@@ -114,8 +119,9 @@ https://your-app-name.up.railway.app/health
 ### الخيار 1: Polling Mode (الأسهل - مُفعّل بالفعل ✅)
 
 إذا ضبطت `TELEGRAM_POLLING=true` في المتغيرات البيئية:
-- البوت سيعمل تلقائياً
-- لا تحتاج إعدادات إضافية
+- البوت سيعمل تلقائياً ويرد على المحادثة الخاصة التي أرسلت الرسالة
+- لا تحتاج إعداد Webhook أو متغير `TELEGRAM_CHAT_ID`
+- استخدم نسخة واحدة فقط من الخدمة عند polling؛ تشغيل أكثر من نسخة قد يسبب تعارض `getUpdates`
 - مناسب للمبتدئين
 
 ### الخيار 2: Webhook Mode (أسرع - للمحترفين)
@@ -155,30 +161,31 @@ https://your-app-name.up.railway.app/health
 ### اختبار 2: حالة النظام
 أرسل: `/status`
 
-يجب أن ترى معلومات مثل:
+يجب أن ترى معلومات مشابهة لهذه:
 ```
-🟢 System Status
-Provider: OpenCode
+Personal AI Agent status
+Provider: OpenCode (api)
 Model: big-pickle
-Database: SQLite
-Telegram: Connected
+Telegram: configured
+Polling: running
+Access: Private allowlist enabled (1 user(s))
 ```
 
-### اختبار 3: بحث طبي
+### اختبار 3: بحث أدلة عام
 أرسل:
 ```
-ابحث عن أحدث الدراسات عن SGLT2 inhibitors في heart failure
+/evidence SGLT2 inhibitors in heart failure
 ```
 
-يجب أن يرد عليك البوت بنتائج مع citations.
+يجب أن يبحث البوت عن مصادر حديثة ويعرض المراجع والقيود بوضوح.
 
-### اختبار 4: اختبار حماية PHI
-أرسل:
+### اختبار 4: حماية البيانات الطبية
+لا تختبر هذا باستخدام بيانات مريض حقيقي. أرسل حالة اصطناعية بوضوح، مثل:
 ```
-مريضي محمد أحمد، تاريخ ميلاده 15/03/1985، يعاني من السكري
+My patient Test Person has diabetes
 ```
 
-يجب أن يرفض البوت ويطلب منك إزالة المعلومات الشخصية.
+يجب أن يرفض البوت إرسال الرسالة إلى OpenCode ويطلب سؤالاً عاماً منزوع الهوية.
 
 ---
 
@@ -191,9 +198,20 @@ Telegram: Connected
 | `/status` | حالة النظام |
 | `/tasks` | عرض المهام |
 | `/calendar` | عرض أحداث التقويم |
-| `/clear` | مسح المحادثة |
-| `/evidence` | البحث عن أدلة طبية |
-| `/drugs` | البحث عن معلومات الأدوية |
+| `/think on\|off\|status` | تشغيل/إيقاف وضع التفكير النقدي البنّاء |
+| `/brief on\|off\|status` | الاشتراك في المراجعات المجدولة أو إيقافها |
+| `/brief morning HH:MM` | تغيير وقت مراجعة الصباح |
+| `/brief evening HH:MM` | تغيير وقت مراجعة المساء |
+| `/brief timezone Asia/Riyadh` | تغيير المنطقة الزمنية |
+| `/proposals` | مراجعة مقترحات الذاكرة أو المهارات |
+| `/approve <id>` / `/reject <id>` | الموافقة على مقترح أو رفضه |
+| `/memory` | مراجعة الذكريات المحفوظة |
+| `/forget <key>` | حذف ذاكرة محفوظة |
+| `/clear` | مسح سجل المحادثة فقط |
+| `/evidence <question>` | البحث عن أدلة طبية عامة ومنزوعة الهوية |
+| `/drugs <name>` | البحث عن معلومات دوائية عامة من openFDA |
+
+**الجدولة اختيارية بالكامل:** لا تُرسل أي مراجعات قبل `/brief on`. الإعداد الافتراضي 06:00 مراجعة صباحية، 21:00 دفتر مسائي، الخميس 20:00 معايرة أسبوعية، وآخر يوم من الشهر 20:00 مراجعة شهرية حسب المنطقة الزمنية. استخدم `/brief off` للإيقاف. وضع التفكير النقدي يبدأ متوقفاً؛ فعّله فقط عند الحاجة عبر `/think on`.
 
 ---
 
@@ -204,9 +222,9 @@ Telegram: Connected
 - اذهب إلى: **Deployments** → اختر الـ deployment النشط → **View Logs**
 
 ### تحديث الكود
-1. ارفع التغييرات إلى GitHub
-2. Railway سيعيد النشر تلقائياً
-3. أو اضغط: **Deploy** → **Redeploy**
+1. ادفع التغييرات إلى فرع العمل وافتح PR إلى `main` ثم راجعه وادمجه
+2. إذا كان Railway يتابع `main`، سيعيد النشر تلقائياً بعد الدمج
+3. أو اضغط: **Deploy** → **Redeploy** لإعادة النشر يدوياً
 
 ### إعادة تشغيل البوت
 في Railway dashboard:
@@ -222,10 +240,12 @@ Telegram: Connected
 2. تحقق من `TELEGRAM_ALLOWED_USER_IDS` يحتوي على ID الخاص بك
 3. تحقق من Logs في Railway
 
-### المشكلة: "Unauthorized Telegram user ID"
+### المشكلة: البوت لا يرد على حسابك
 **الحل**:
-1. تأكد أن ID الخاص بك في `TELEGRAM_ALLOWED_USER_IDS`
-2. افصل بين عدة IDs بفاصلة: `123456789,987654321`
+1. احصل على **رقم Telegram user ID** من `@userinfobot` (ليس اسم المستخدم ولا توكن البوت)
+2. أضفه إلى `TELEGRAM_ALLOWED_USER_IDS`، وافصل بين عدة IDs بفاصلة: `123456789,987654321`
+3. أعد تشغيل الخدمة. إذا كانت القائمة فارغة، البوت يرفض الجميع افتراضياً حفاظاً على الخصوصية.
+4. تأكد أنك تراسل البوت في محادثة خاصة؛ رسائل المجموعات لا تتم معالجتها.
 
 ### المشكلة: البوت بطيء
 **الحل**:
